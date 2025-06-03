@@ -516,7 +516,7 @@
 
 
             <div style="margin-top: 20px;" class="action-buttons">
-                <button id="calculate-results">Calculate Race Results & View</button>
+                <button id="calculate-results">Calculate Results and Save</button>
                 <button id="clear-all" class="btn-warning">Clear Current List/Pool</button>
                 <button id="clear-short-course-session-btn" class="btn-danger hidden">Clear Created Races</button>
             </div>
@@ -526,11 +526,8 @@
         <!-- Race Results Tab -->
         <div id="results-tab" class="tab-content">
              <h2>Race Results</h2>
-             <!-- Series and Race selectors removed from here -->
              <div id="result-race-info"></div>
-             <div class="action-buttons">
-                 <button id="save-results-tab-btn" class="btn-save">Save These Results to Series</button>
-             </div>
+             <!-- Save button removed from here -->
              <div style="overflow-x: auto;">
                  <table id="results-table" class="results-table">
                      <thead>
@@ -644,7 +641,7 @@
 
         const resultsBody = document.getElementById('results-body');
         const resultRaceInfo = document.getElementById('result-race-info');
-        const saveResultsTabBtn = document.getElementById('save-results-tab-btn');
+        // const saveResultsTabBtn = document.getElementById('save-results-tab-btn'); // Button is removed from HTML
 
         const seriesResultsBody = document.getElementById('series-results-body');
         const seriesResultsHeader = document.getElementById('series-results-header');
@@ -1117,21 +1114,20 @@
                     targetEntry.skipper = boatDetails.skipper;
                     targetEntry.yardstick = boatDetails.yardstick;
                     
-                    const mainFormStatus = document.querySelector('input[name="race-status"]:checked')?.value;
-                    const mainFormElapsed = elapsedTime?.value.trim();
-
-                    if (mainFormStatus && mainFormStatusGroup && !mainFormStatusGroup.classList.contains('hidden')) { 
-                        targetEntry.status = mainFormStatus;
-                        if (mainFormStatus === 'finished') {
-                            if (mainFormElapsed && timeToSeconds(mainFormElapsed) === -1) { 
-                                alert('Invalid time format in form. Use h:m:s, h m s, m:s, or m s (e.g., 1:30:45, 1 30 45, 30:45, or 30 45).'); return; 
-                            } else if (!mainFormElapsed && mainFormStatus === 'finished') {
-                                alert('Elapsed time is required for finished status when editing via form.'); return;
-                            }
-                            targetEntry.elapsedTime = mainFormElapsed;
-                        } else {
-                            targetEntry.elapsedTime = '';
-                        }
+                    const mainFormData = getEntryFormData(); 
+                    if (!mainFormData && (document.querySelector('input[name="race-status"]:checked')?.value === 'finished')) {
+                        return; 
+                    }
+                    
+                    if (mainFormData) {
+                        targetEntry.status = mainFormData.status;
+                        targetEntry.elapsedTime = mainFormData.elapsedTime; // Raw valid time
+                    } else if (document.querySelector('input[name="race-status"]:checked')?.value !== 'finished') {
+                        targetEntry.status = document.querySelector('input[name="race-status"]:checked')?.value;
+                        targetEntry.elapsedTime = '';
+                    } else {
+                        console.error("Update short course: Could not get valid data from form.");
+                        return;
                     }
                     renderShortCourseSessionRaces();
 
@@ -1199,7 +1195,7 @@
             }
 
             let status = 'finished'; 
-            let elapsed = '';     
+            let elapsed = ''; // This will store the raw valid time string or be empty    
 
             const inStandardRaceContext = standardEntryFields && !standardEntryFields.classList.contains('hidden');
             const mainFormStatusTimeActive = mainFormStatusGroup && !mainFormStatusGroup.classList.contains('hidden');
@@ -1210,12 +1206,16 @@
                  elapsed = '';
             } else if (mainFormStatusTimeActive) { 
                  status = document.querySelector('input[name="race-status"]:checked')?.value;
-                 elapsed = elapsedTime?.value.trim();
+                 let rawElapsed = elapsedTime?.value.trim();
                  if (!status) { alert('Race Status required from form.'); return null; }
                  if (status === 'finished') { 
-                     if (elapsed && timeToSeconds(elapsed) === -1) { 
-                         alert('Invalid time format. Use h:m:s, h m s, m:s, or m s (e.g., 1:30:45, 1 30 45, 30:45, or 30 45).'); return null; 
-                     } else if (!elapsed) {
+                     if (rawElapsed) {
+                         const seconds = timeToSeconds(rawElapsed);
+                         if (seconds === -1) { 
+                             alert('Invalid time format in form. Use h:m:s, h m s, m:s, or m s (e.g., 1:30:45, 1 30 45, 30:45, or 30 45).'); return null; 
+                         }
+                         elapsed = rawElapsed; // Store raw valid time
+                     } else {
                          alert('Elapsed time is required for finished status from form.'); return null;
                      }
                  }
@@ -1234,7 +1234,7 @@
                 skipper: savedBoat.skipper,
                 yardstick: currentYardstick,
                 status,
-                elapsedTime: elapsed
+                elapsedTime: elapsed 
             };
         }
         
@@ -1243,23 +1243,30 @@
                 console.error("Invalid index for updateStandardEntryInTable"); return;
             }
             const entry = entries[index];
-            entry[field] = value;
-
             const row = entriesBody.querySelector(`tr[data-entry-index="${index}"]`);
-            if (!row) return;
+            const timeInputInTable = row?.querySelector('.table-entry-input');
 
-            if (field === 'status') {
-                const timeInput = row.querySelector('.table-entry-input');
-                if (timeInput) {
-                    timeInput.disabled = (value !== 'finished');
-                    if (value !== 'finished') {
-                        timeInput.value = '';
+            if (field === 'elapsedTime' && entry.status === 'finished') {
+                if (value.trim() === '') { 
+                    entry.elapsedTime = '';
+                } else if (isValidTimeFormat(value)) { 
+                    entry.elapsedTime = value.trim(); // Store raw valid time
+                    // DO NOT reformat timeInputInTable.value here
+                } else { 
+                    entry.elapsedTime = value; 
+                    console.warn("Invalid time format entered in table:", value, ". Use h:m:s, h m s, m:s, or m s.");
+                }
+            } else if (field === 'status') {
+                entry.status = value; 
+                if (timeInputInTable) {
+                    timeInputInTable.disabled = (entry.status !== 'finished');
+                    if (entry.status !== 'finished') {
+                        timeInputInTable.value = '';
                         entry.elapsedTime = ''; 
                     }
                 }
-            }
-            if (field === 'elapsedTime' && entry.status === 'finished' && value && timeToSeconds(value) === -1) {
-                 console.warn("Invalid time format entered in table:", value, ". Use h:m:s, h m s, m:s, or m s.");
+            } else {
+                 entry[field] = value;
             }
         }
 
@@ -1334,7 +1341,7 @@
                  if(timeInputs) timeInputs.classList.add('hidden');
                  if (entryFormTitle) entryFormTitle.textContent = "Edit Boat in Pool";
 
-            } else {
+            } else { 
                  console.warn("editEntry called for standard series, but table edit button is removed.");
                  return;
             }
@@ -1377,7 +1384,7 @@
             if(editingShortCourseRaceIndexInput) editingShortCourseRaceIndexInput.value = raceIndex;
 
             if(mainFormStatusGroup) mainFormStatusGroup.classList.remove('hidden');
-            if(elapsedTime) elapsedTime.value = entry.elapsedTime || '';
+            if(elapsedTime) elapsedTime.value = entry.elapsedTime || ''; 
             try {
                 const statusRadio = document.getElementById(`status-${entry.status.toLowerCase()}`);
                 if(statusRadio) statusRadio.checked = true; else document.getElementById('status-finished').checked = true;
@@ -1479,7 +1486,7 @@
             const raceEntries = JSON.parse(JSON.stringify(entries)).map(entry => ({
                 ...entry,
                 status: 'finished', 
-                elapsedTime: ''
+                elapsedTime: '' // Raw times from pool, will be populated in table
             }));
             shortCourseSessionRaces.push({
                 raceNumber: nextRaceNumber,
@@ -1573,21 +1580,32 @@
                 console.error("Invalid indices for updateShortCourseEntry"); return;
             }
             const entry = shortCourseSessionRaces[raceIndex].entries[entryIndex];
-            entry[field] = value;
-            if (field === 'status') {
-                const row = shortCourseRacesContainer.querySelector(`div[data-race-index="${raceIndex}"] tr[data-entry-index="${entryIndex}"]`);
-                const timeInput = row?.querySelector('.sc-time-input');
-                if (timeInput) {
-                    timeInput.disabled = (value !== 'finished');
-                    if (value !== 'finished') {
-                        timeInput.value = '';
+            const raceSectionDiv = shortCourseRacesContainer.querySelector(`div[data-race-index="${raceIndex}"]`);
+            const row = raceSectionDiv?.querySelector(`tr[data-entry-index="${entryIndex}"]`);
+            const timeInputInTable = row?.querySelector('.sc-time-input');
+
+            if (field === 'elapsedTime' && entry.status === 'finished') {
+                if (value.trim() === '') { 
+                    entry.elapsedTime = '';
+                } else if (isValidTimeFormat(value)) { 
+                    entry.elapsedTime = value.trim(); // Store raw valid time
+                    // DO NOT reformat timeInputInTable.value here
+                } else { 
+                    entry.elapsedTime = value; 
+                    console.warn("Invalid time format entered in SC table:", value, ". Use h:m:s, h m s, m:s, or m s.");
+                }
+            } else if (field === 'status') {
+                entry.status = value; 
+                if (timeInputInTable) {
+                    timeInputInTable.disabled = (entry.status !== 'finished');
+                    if (entry.status !== 'finished') {
+                        timeInputInTable.value = '';
                         entry.elapsedTime = '';
                     }
                 }
+            } else {
+                 entry[field] = value;
             }
-             if (field === 'elapsedTime' && entry.status === 'finished' && value && timeToSeconds(value) === -1) {
-                 console.warn("Invalid time format entered:", value, ". Use h:m:s, h m s, m:s, or m s.");
-             }
         }
 
         function updateCreateRaceButton() {
@@ -1623,7 +1641,7 @@
                  if (!currentSeries) {
                      alert("Error: No series selected."); return;
                  }
-
+                
                  for (const sessionRaceData of shortCourseSessionRaces) {
                     const invalidTimeEntry = sessionRaceData.entries.find(e => 
                         e.status === 'finished' && 
@@ -1656,11 +1674,23 @@
                      let nextRaceNum = maxExistingRaceNum + 1;
 
                      for (const sessionRaceData of shortCourseSessionRaces) {
-                         const calculatedResults = calculateSingleRaceResults(sessionRaceData.entries, seriesToUpdate);
+                         const calculatedResults = calculateSingleRaceResults(sessionRaceData.entries, seriesToUpdate); 
+                         
+                         // Derive entriesForSaving from calculatedResults to ensure standardized times in saved entries
+                         const entriesForSaving = calculatedResults.map(cr => ({
+                             savedBoatId: cr.savedBoatId,
+                             sailNumber: cr.sailNumber,
+                             boatClass: cr.boatClass,
+                             skipper: cr.skipper,
+                             yardstick: cr.yardstick,
+                             status: cr.status,
+                             elapsedTime: cr.elapsedTime // This is standardized by calculateSingleRaceResults
+                         }));
+
                          const raceToSave = {
                              raceNumber: nextRaceNum,
                              date: new Date().toISOString().split('T')[0],
-                             entries: JSON.parse(JSON.stringify(sessionRaceData.entries)),
+                             entries: entriesForSaving, 
                              results: calculatedResults
                          };
                          seriesToUpdate.races.push(raceToSave);
@@ -1684,7 +1714,7 @@
                      console.error("Error calculating or saving short course races:", error);
                      alert("Error: " + error.message);
                  }
-            } else { 
+            } else { // Standard Race Calculation & IMMEDIATE SAVE
                 if (entries.length === 0) { alert('Add at least one boat entry first.'); return; }
                 if (!currentSeries || typeof currentRace !== 'number') { 
                     alert("Select a series and race number first."); return;
@@ -1700,32 +1730,77 @@
                     return;
                 }
 
-
-                const newlyCalculatedResults = calculateSingleRaceResults(entries, currentSeries, currentRace);
-
-                setActiveTab(resultsTab);
-                results = newlyCalculatedResults; 
-                renderRaceResults();
-
-                if (resultRaceInfo) {
-                    const infoPanel = resultRaceInfo.querySelector('.race-info-panel');
-                    const infoHtml = infoPanel ? infoPanel.outerHTML : '';
-                    const existingMessage = resultRaceInfo.querySelector('p[style*="color: orange"]');
-                    if (existingMessage) existingMessage.remove(); 
-                    resultRaceInfo.innerHTML = infoHtml + `<p style="color: orange; font-weight: bold; margin-top: 10px;">Results have been calculated. Please review carefully. If everything is correct, click 'Save These Results to Series' to finalise and save them. If not correct, go back to Race Entry page and update any mistakes.</p>`;
+                if (!confirm(`This will calculate results for Race ${currentRace} in series "${currentSeries.name}" and save them permanently. Are you sure you want to proceed?`)) {
+                    return;
                 }
+
+                const newlyCalculatedResults = calculateSingleRaceResults(entries, currentSeries, currentRace); 
+
+                // --- Start: Saving logic ---
+                const seriesId = currentSeries.id;
+                const raceNum = currentRace;
+
+                const targetSeries = series.find(s => s.id === seriesId); 
+                if (!targetSeries) { alert("Error: Series not found in application data for saving."); return; }
+
+                const raceIndex = targetSeries.races.findIndex(race => race.raceNumber === raceNum); 
+                if (raceIndex === -1) { alert(`Error: Race ${raceNum} not found in series "${targetSeries.name}" for saving.`); return; }
+
+                const existingSavedResults = targetSeries.races[raceIndex].results;
+                if (existingSavedResults && existingSavedResults.length > 0 && newlyCalculatedResults.length > 0) {
+                    if (!confirm(`Race ${raceNum} already has saved results. Overwrite with these new calculations?`)) {
+                         return; 
+                    }
+                }
+
+
+                const resultsToSave = JSON.parse(JSON.stringify(newlyCalculatedResults)); 
+                const entriesToSave = resultsToSave.map(res => ({
+                    savedBoatId: res.savedBoatId,
+                    sailNumber: res.sailNumber, boatClass: res.boatClass, skipper: res.skipper,
+                    yardstick: res.yardstick,
+                    status: res.status, elapsedTime: res.elapsedTime || '' 
+                }));
+                let dateToSave = targetSeries.races[raceIndex].date || new Date().toISOString().split('T')[0];
+
+                try {
+                    targetSeries.races[raceIndex].date = dateToSave;
+                    targetSeries.races[raceIndex].entries = entriesToSave; 
+                    targetSeries.races[raceIndex].results = resultsToSave;
+
+                    await saveDataToGoogleSheet();
+
+                    editMode = false; 
+                    if(editModeWarning) editModeWarning.classList.add('hidden');
+                    alert(`Race ${raceNum} results calculated and saved successfully for series "${targetSeries.name}".`);
+                    
+                    refreshSeriesDropdowns(); 
+                    
+                    results = resultsToSave; 
+
+                    setActiveTab(resultsTab); 
+
+                } catch (error) { 
+                    console.error("Error saving race results from Race Entry tab:", error); 
+                    alert("Error saving race results: " + error.message); 
+                    return; 
+                }
+                // --- End: Saving logic ---
             }
         });
 
         function calculateSingleRaceResults(raceEntries, targetSeries, raceNumberForOOD = null) {
              if (!raceEntries || raceEntries.length === 0) return [];
-             let calculated = JSON.parse(JSON.stringify(raceEntries));
+             let calculated = JSON.parse(JSON.stringify(raceEntries)); // Deep copy
              calculated.forEach(result => {
-                 result.elapsedTime = result.elapsedTime || '';
+                 let rawElapsedTime = result.elapsedTime || ''; // Use raw time from input
+                 result.elapsedTime = ''; // Will be set to standardized format if finished and valid
+
                  if (result.status === 'finished') {
-                     if (result.elapsedTime.length > 0) {
-                         const elapsedSeconds = timeToSeconds(result.elapsedTime);
-                         if (elapsedSeconds >= 0) { // Valid parse (0 or more seconds)
+                     if (rawElapsedTime.length > 0) {
+                         const elapsedSeconds = timeToSeconds(rawElapsedTime);
+                         if (elapsedSeconds >= 0) { // Valid parse
+                             result.elapsedTime = secondsToTime(elapsedSeconds); // Standardize format here for the result object
                              if (result.yardstick && result.yardstick > 0) {
                                  const correctedSeconds = elapsedSeconds * 100 / result.yardstick;
                                  result.correctedSeconds = correctedSeconds;
@@ -1735,6 +1810,7 @@
                              }
                          } else { // elapsedSeconds === -1, parsing failed
                               result.correctedSeconds = Infinity; result.correctedTime = 'Error: TimeFmt';
+                              result.elapsedTime = rawElapsedTime; // Keep raw invalid time for display if needed
                          }
                      } else { // Elapsed time string is empty for a finished boat
                           result.correctedSeconds = Infinity; result.correctedTime = 'Error: NoTime';
@@ -1822,33 +1898,26 @@
             if (!resultsBody || !resultRaceInfo) return;
             resultsBody.innerHTML = '';
 
+            const fixedMessage = `<p style="margin-top: 10px;">Results have been calculated. Please review them carefully. If anything is incorrect, return to the Race Entry page and make the necessary updates.</p>`;
+
             if (!currentSeries || typeof currentRace !== 'number') {
-                resultRaceInfo.innerHTML = `<div class="race-info-panel"><h3>Race Information</h3><p>No results calculated. Please go to the Race Entry tab.</p></div>`;
+                resultRaceInfo.innerHTML = `<div class="race-info-panel"><h3>Race Information</h3><p>No results calculated or loaded. Please go to the Race Entry tab.</p></div>`;
                 const row = resultsBody.insertRow();
                 const cell = row.insertCell();
                 cell.colSpan = 9;
-                cell.textContent = 'Please calculate results from the Race Entry tab first.';
+                cell.textContent = 'Please calculate or load results first.';
                 cell.style.textAlign = 'center'; cell.style.fontStyle = 'italic'; cell.style.color = '#666';
-                if(saveResultsTabBtn) saveResultsTabBtn.classList.add('hidden'); // Hide save button
                 return;
             }
-            if(saveResultsTabBtn) saveResultsTabBtn.classList.remove('hidden'); // Show save button
+            
+            const seriesNameDisplay = currentSeries.name;
+            const raceNumberDisplay = currentRace;
 
-            const seriesName = currentSeries.name;
-            const raceNumber = currentRace;
-
-            let statusMessage = ''; 
-            const existingStatusPara = resultRaceInfo.querySelector('p[style*="color: orange"]');
-            if (existingStatusPara && resultsTab.classList.contains('active-tab')) { 
-                 statusMessage = existingStatusPara.outerHTML;
-            }
-
-
-            resultRaceInfo.innerHTML = `<div class="race-info-panel"><h3>Race Information</h3><p><strong>Series:</strong> ${seriesName}</p><p><strong>Race Number:</strong> ${raceNumber}</p><p><strong>Entries Shown:</strong> ${results?.length || 0}</p></div>` + statusMessage;
+            resultRaceInfo.innerHTML = `<div class="race-info-panel"><h3>Race Information</h3><p><strong>Series:</strong> ${seriesNameDisplay}</p><p><strong>Race Number:</strong> ${raceNumberDisplay}</p><p><strong>Entries Shown:</strong> ${results?.length || 0}</p></div>` + fixedMessage;
 
             if (!results || results.length === 0) {
                  const existingInfoHTML = resultRaceInfo.innerHTML; 
-                 resultRaceInfo.innerHTML = existingInfoHTML + '<p>No results calculated or loaded for this race.</p>';
+                 // resultRaceInfo.innerHTML = existingInfoHTML; // Message already includes "Entries Shown: 0"
                  const row = resultsBody.insertRow(); const cell = row.insertCell(); cell.colSpan = 9;
                  cell.textContent = 'No results to display for this race.'; cell.style.textAlign = 'center'; cell.style.fontStyle = 'italic'; cell.style.color = '#666'; return;
             }
@@ -1861,73 +1930,7 @@
             });
         }
 
-        if(saveResultsTabBtn) saveResultsTabBtn.addEventListener('click', async () => {
-            if (!currentSeries || typeof currentRace !== 'number') {
-                alert("Error: No current series or race identified to save results for. Please calculate results first.");
-                return;
-            }
-            const seriesId = currentSeries.id;
-            const raceNum = currentRace;
-
-            if (!results) { alert("No results data available to save."); return; }
-            if (results.length === 0 && !confirm(`No results displayed for Race ${raceNum}. Save as having no results? This clears previous results if any existed.`)) { return; }
-
-            const targetSeries = series.find(s => s.id === seriesId); 
-            if (!targetSeries) { alert("Error: Series not found in application data."); return; }
-
-            if (targetSeries.isShortCourse) {
-                alert("Saving for short courses is done via the 'Calculate Race Results & View' button on the Race Entry tab after creating races.");
-                return;
-            }
-
-            const raceIndex = targetSeries.races.findIndex(race => race.raceNumber === raceNum); 
-            if (raceIndex === -1) { alert(`Error: Race ${raceNum} not found in series "${targetSeries.name}".`); return; }
-
-            const existingSavedResults = targetSeries.races[raceIndex].results;
-            if (existingSavedResults && existingSavedResults.length > 0 && results.length > 0 && !confirm(`Race ${raceNum} already has saved results. Overwrite?`)) { return; }
-
-            const resultsToSave = JSON.parse(JSON.stringify(results));
-            const entriesToSave = resultsToSave.map(res => ({
-                savedBoatId: res.savedBoatId,
-                sailNumber: res.sailNumber, boatClass: res.boatClass, skipper: res.skipper,
-                yardstick: res.yardstick,
-                status: res.status, elapsedTime: res.elapsedTime || ''
-            }));
-            let dateToSave = targetSeries.races[raceIndex].date || new Date().toISOString().split('T')[0];
-
-            try {
-                targetSeries.races[raceIndex].date = dateToSave;
-                targetSeries.races[raceIndex].entries = entriesToSave;
-                targetSeries.races[raceIndex].results = resultsToSave;
-
-                await saveDataToGoogleSheet();
-
-                editMode = false; 
-                if(editModeWarning) editModeWarning.classList.add('hidden');
-                alert(`Race ${raceNum} results saved successfully for series "${targetSeries.name}".`);
-                
-                refreshSeriesDropdowns(); 
-                
-                loadRaceResults(); 
-
-                if (seriesResultsTab && seriesResultsTab.classList.contains('active-tab') && viewSeries?.value == seriesId) calculateSeriesResults();
-                if (raceViewTab && raceViewTab.classList.contains('active-tab') && viewAllSeries?.value == seriesId) {
-                    displayRaceViewer(); 
-                    const raceButton = raceSelector?.querySelector(`.race-button[data-race-number="${raceNum}"]`);
-                    if (raceButton) { 
-                        document.querySelectorAll('.race-button.active').forEach(b => b.classList.remove('active')); 
-                        raceButton.classList.add('active'); 
-                        displayRaceResultsView(targetSeries, raceNum); 
-                    }
-                }
-                const statusPara = resultRaceInfo?.querySelector('p[style*="color: orange"]');
-                if (statusPara) statusPara.remove();
-
-            } catch (error) { 
-                console.error("Error saving race results:", error); 
-                alert("Error saving race results: " + error.message); 
-            }
-        });
+        // saveResultsTabBtn related functions and event listeners are removed as the button is gone.
 
         // --- Series Management ---
         if (seriesShortCourseCheck) seriesShortCourseCheck.addEventListener('change', (e) => {
@@ -2766,14 +2769,20 @@
                             s.races = (Array.isArray(s.races) ? s.races : []).map((r, r_idx) => {
                                 if (!r || typeof r !== 'object') return { raceNumber: r_idx + 1, date: null, entries: [], results: [] };
                                 r.raceNumber = typeof r.raceNumber === 'number' ? r.raceNumber : r_idx + 1;
-                                r.entries = (Array.isArray(r.entries) ? r.entries : []).map(entry => {
-                                    const boatFromList = boatList.find(b => b.id === entry.savedBoatId);
-                                    return {...entry, elapsedTime: entry.elapsedTime || '', savedBoatId: entry.savedBoatId || null, yardstick: entry.yardstick || boatFromList?.yardstick || 100 };
-                                });
-                                r.results = (Array.isArray(r.results) ? r.results : []).map(result => {
-                                    const boatFromList = boatList.find(b => b.id === result.savedBoatId);
-                                    return {...result, elapsedTime: result.elapsedTime || '', savedBoatId: result.savedBoatId || null, yardstick: result.yardstick || boatFromList?.yardstick || 100 };
-                                });
+                                
+                                const standardizeTimesInArray = (arr) => {
+                                    return (Array.isArray(arr) ? arr : []).map(item => {
+                                        const boatFromList = boatList.find(b => b.id === item.savedBoatId);
+                                        let standardizedElapsedTime = item.elapsedTime || '';
+                                        if (item.status === 'finished' && standardizedElapsedTime) {
+                                            const seconds = timeToSeconds(standardizedElapsedTime);
+                                            if (seconds >= 0) standardizedElapsedTime = secondsToTime(seconds);
+                                        }
+                                        return {...item, elapsedTime: standardizedElapsedTime, savedBoatId: item.savedBoatId || null, yardstick: item.yardstick || boatFromList?.yardstick || 100 };
+                                    });
+                                };
+                                r.entries = standardizeTimesInArray(r.entries);
+                                r.results = standardizeTimesInArray(r.results);
                                 r.date = r.date || null;
                                 return r;
                             });
@@ -2793,11 +2802,18 @@
                                    for (let i_race = 1; i_race <= expectedNumRaces; i_race++) {
                                        const existing = existingRacesData.get(i_race);
                                        const defaultYardstick = existing?.savedBoatId ? (boatList.find(b=>b.id === existing.savedBoatId)?.yardstick || 100) : 100;
+                                       
+                                       const mapEntries = (entriesArray) => (Array.isArray(entriesArray) ? entriesArray : []).map(entry => {
+                                           let stdTime = entry.elapsedTime || '';
+                                           if (entry.status === 'finished' && stdTime) { const secs = timeToSeconds(stdTime); if (secs >= 0) stdTime = secondsToTime(secs); }
+                                           return {...entry, elapsedTime: stdTime, savedBoatId: entry.savedBoatId || null, yardstick: entry.yardstick || defaultYardstick};
+                                       });
+
                                        reconciledRaces.push({
                                            raceNumber: i_race,
                                            date: existing?.date || null,
-                                           entries: (Array.isArray(existing?.entries) ? existing.entries : []).map(entry => ({...entry, elapsedTime: entry.elapsedTime || '', savedBoatId: entry.savedBoatId || null, yardstick: entry.yardstick || defaultYardstick})),
-                                           results: (Array.isArray(existing?.results) ? existing.results : []).map(result => ({...result, elapsedTime: result.elapsedTime || '', savedBoatId: result.savedBoatId || null, yardstick: result.yardstick || defaultYardstick}))
+                                           entries: mapEntries(existing?.entries),
+                                           results: mapEntries(existing?.results)
                                        });
                                    }
                                    s.races = reconciledRaces;
@@ -2918,14 +2934,19 @@
                             s.races = (Array.isArray(s.races) ? s.races : []).map((r, r_idx) => {
                                 if (!r || typeof r !== 'object') return { raceNumber: r_idx + 1, date: null, entries: [], results: [] };
                                 r.raceNumber = typeof r.raceNumber === 'number' ? r.raceNumber : r_idx + 1;
-                                r.entries = (Array.isArray(r.entries) ? r.entries : []).map(entry => {
+                                
+                                const mapEntriesForImport = (entriesArray) => (Array.isArray(entriesArray) ? entriesArray : []).map(entry => {
                                     const boatFromList = entry.savedBoatId ? boatList.find(b => b.id === entry.savedBoatId) : null;
-                                    return {...entry, elapsedTime: entry.elapsedTime || '', savedBoatId: entry.savedBoatId || null, yardstick: entry.yardstick || boatFromList?.yardstick || 100 };
+                                    let standardizedElapsedTime = entry.elapsedTime || '';
+                                    if (entry.status === 'finished' && standardizedElapsedTime) {
+                                        const seconds = timeToSeconds(standardizedElapsedTime);
+                                        if (seconds >= 0) standardizedElapsedTime = secondsToTime(seconds);
+                                    }
+                                    return {...entry, elapsedTime: standardizedElapsedTime, savedBoatId: entry.savedBoatId || null, yardstick: entry.yardstick || boatFromList?.yardstick || 100 };
                                 });
-                                r.results = (Array.isArray(r.results) ? r.results : []).map(result => {
-                                    const boatFromList = result.savedBoatId ? boatList.find(b => b.id === result.savedBoatId) : null;
-                                    return {...result, elapsedTime: result.elapsedTime || '', savedBoatId: result.savedBoatId || null, yardstick: result.yardstick || boatFromList?.yardstick || 100 };
-                                });
+
+                                r.entries = mapEntriesForImport(r.entries);
+                                r.results = mapEntriesForImport(r.results);
                                 r.date = r.date || null;
                                 return r;
                             });
@@ -2944,11 +2965,18 @@
                                    for (let i_race = 1; i_race <= expectedNumRaces; i_race++) {
                                        const existing = existingRacesData.get(i_race);
                                        const defaultYardstick = existing?.savedBoatId ? (boatList.find(b=>b.id === existing.savedBoatId)?.yardstick || 100) : 100;
+                                       
+                                       const mapEntriesForReconciliation = (entriesArray) => (Array.isArray(entriesArray) ? entriesArray : []).map(entry => {
+                                           let stdTime = entry.elapsedTime || '';
+                                           if (entry.status === 'finished' && stdTime) { const secs = timeToSeconds(stdTime); if (secs >=0) stdTime = secondsToTime(secs); }
+                                           return {...entry, elapsedTime: stdTime, savedBoatId: entry.savedBoatId || null, yardstick: entry.yardstick || defaultYardstick};
+                                       });
+
                                        reconciledRaces.push({
                                            raceNumber: i_race,
                                            date: existing?.date || null,
-                                           entries: (Array.isArray(existing?.entries) ? existing.entries : []).map(entry => ({...entry, elapsedTime: entry.elapsedTime || '', savedBoatId: entry.savedBoatId || null, yardstick: entry.yardstick || defaultYardstick})),
-                                           results: (Array.isArray(existing?.results) ? existing.results : []).map(result => ({...result, elapsedTime: result.elapsedTime || '', savedBoatId: result.savedBoatId || null, yardstick: result.yardstick || defaultYardstick}))
+                                           entries: mapEntriesForReconciliation(existing?.entries),
+                                           results: mapEntriesForReconciliation(existing?.results)
                                        });
                                    }
                                    s.races = reconciledRaces;
@@ -3020,6 +3048,10 @@
         async function initApp() {
             console.log("Initializing Sailing App (Google Sheets Mode)...");
             initYardsticks();
+
+            if (calculateResultsBtn) { // Change button text on load
+                calculateResultsBtn.textContent = "Calculate Results and Save";
+            }
 
             await loadDataFromGoogleSheet();
 
